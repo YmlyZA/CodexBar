@@ -2,173 +2,81 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Overview
+## Build Commands
 
-CodexBar is a macOS 14+ menu bar application that monitors API usage limits and quotas for multiple AI/LLM providers (Codex, Claude, Cursor, Gemini, Antigravity, Droid/Factory, Copilot, z.ai, Kiro, Vertex AI, and Augment). Built with Swift 6 strict concurrency.
-
-**Requirements:** Swift 6.2+, macOS 14+
-
-## Development Commands
-
-### Prerequisites & Swift Version
-CodexBar requires **Swift 6.2 or later**. Check with `swift --version`.
-
-If you have an earlier version, install via Homebrew:
 ```bash
-brew install swift@6.2
-export PATH="/usr/local/opt/swift@6.2/bin:$PATH"
+# Debug build for development (use Swift 6.2 on Intel Macs)
+export PATH="/usr/local/opt/swift/bin:$PATH" && swift build -c debug
+
+# Release build
+export PATH="/usr/local/opt/swift/bin:$PATH" && swift build -c release
+
+# Package app (builds CodexBar.app in-place)
+export PATH="/usr/local/opt/swift/bin:$PATH" && CODEXBAR_SIGNING=adhoc ./Scripts/package_app.sh
+
+# Ad-hoc signing (no Apple Developer account needed)
+export PATH="/usr/local/opt/swift/bin:$PATH" && CODEXBAR_SIGNING=adhoc ./Scripts/package_app.sh
+
+# Development loop: compile and run
+export PATH="/usr/local/opt/swift/bin:$PATH" && ./Scripts/compile_and_run.sh
+
+# Run tests
+export PATH="/usr/local/opt/swift/bin:$PATH" && swift test
+
+# Format and lint
+swiftformat .
+swiftlint
 ```
 
-### Build & Run
-```bash
-# Primary dev loop - kills old instances, builds, tests, packages, and launches
-./Scripts/compile_and_run.sh
+## macOS 14+ & Build Notes
 
-# Individual commands
-swift build                    # Debug build
-swift build -c release         # Release build
-swift test                     # Run all tests
-./Scripts/package_app.sh       # Package as CodexBar.app
-CODEXBAR_ALLOW_LLDB=1 ./Scripts/package_app.sh  # Debug build with LLDB
-```
+- **Intel Macs**: Requires Swift 6.2+ (install from swift.org and use `export PATH="/usr/local/opt/swift/bin:$PATH"` before builds)
+- **Apple Silicon**: Use system Swift (no PATH adjustment needed)
 
-### Architecture-Specific Builds
-```bash
-# Intel (x86_64) only
-ARCHES="x86_64" ./Scripts/package_app.sh
+## Project Architecture
 
-# Universal binary (arm64 + x86_64) - default behavior
-./Scripts/package_app.sh
+CodexBar is a SwiftPM-based macOS 14+ menu bar app with modular targets:
 
-# Verify architecture
-file CodexBar.app/Contents/MacOS/CodexBar
-lipo -info CodexBar.app/Contents/MacOS/CodexBar  # for universal
-```
+- **CodexBarCore**: Fetching, parsing, and provider implementations (browser cookies, CLI probes, API clients)
+- **CodexBar**: Main app (SwiftUI + AppKit), StatusItemController, menus, icon rendering
+- **CodexBarWidget**: WidgetKit extension mirroring the menu card snapshot
+- **CodexBarCLI**: Bundled CLI (`codexbar`) for scripts and CI
+- **CodexBarMacros/MacroSupport**: SwiftSyntax macros for provider registration
+- **CodexBarClaudeWatchdog/ClaudeWebProbe**: Helper processes for Claude CLI stability
 
-### Code Quality
-```bash
-pnpm check                     # Run both format check and lint
-swiftformat Sources Tests      # Format code
-swiftlint --strict             # Lint code
-```
+Key data flow:
+- Background refresh → UsageFetcher/provider probes → UsageStore → menu/icon/widgets
+- SettingsStore controls refresh cadence and feature flags
 
-### Testing
-```bash
-swift test                              # Full suite
-swift test --filter TTYIntegrationTests  # Filter specific tests
-LIVE_TEST=1 swift test --filter LiveAccountTests  # Live API tests
-```
+Concurrency: Swift 6 strict concurrency enabled with Sendable state and explicit MainActor hops.
 
-### App Restart After Build
-```bash
-# Guaranteed restart with fresh bundle (update path as needed)
-pkill -x CodexBar || pkill -f CodexBar.app || true
-cd /Users/ksmac/github.com/CodexBar && open -n CodexBar.app
-```
+## Key Files
 
-## Architecture
+- `Package.swift`: SwiftPM configuration, platform targets (macOS 14+)
+- `Sources/CodexBar/StatusItemController.swift`: Main menu bar controller
+- `Sources/CodexBar/UsageStore.swift`: Central state for usage data
+- `Sources/CodexBar/Providers/Shared/ProviderImplementation.swift`: Provider protocol
+- `Sources/CodexBarCore/CostUsageFetcher.swift`: Local cost tracking from logs
 
-### Module Structure
+## Providers
 
-```
-Sources/
-├── CodexBar/              # Main app (UI, state management, menu bar)
-├── CodexBarCore/          # Business logic (fetchers, parsers, models)
-├── CodexBarCLI/           # Command-line interface
-├── CodexBarWidget/        # WidgetKit extension
-├── CodexBarMacros/        # SwiftSyntax macros for provider registration
-├── CodexBarMacroSupport/  # Shared macro support
-├── CodexBarClaudeWatchdog/  # Helper process for Claude CLI
-└── CodexBarClaudeWebProbe/   # CLI helper for web diagnostics
-```
+10+ provider implementations (Codex, Claude, Cursor, Gemini, Antigravity, Factory, Copilot, z.ai, Kiro, Vertex AI, Augment). Each provider lives in `Sources/CodexBar/Providers/<Name>/` with login flow and usage fetching.
 
-**Core Separation:** CodexBar handles UI/state management, CodexBarCore contains all provider fetchers, parsers, and models.
+## Release Process
 
-### Provider System (Macro-Driven Registration)
+See `docs/RELEASING.md` for full checklist. Key steps:
 
-Providers use Swift macros to auto-register - no manual list maintenance needed:
+1. **Build universal binary**: Run on Apple Silicon Mac with `./Scripts/sign-and-notarize.sh` (builds both arm64 + x86_64)
+   - Intel-only build: `export PATH="/usr/local/opt/swift/bin:$PATH" && CODEXBAR_SIGNING=adhoc ./Scripts/package_app.sh`
+2. Generate appcast: `./Scripts/make_appcast.sh`
+3. Update Homebrew cask at `../homebrew-tap/Casks/codexbar.rb` (remove `depends_on arch: :arm64` for Intel support)
 
-```swift
-@ProviderDescriptorRegistration
-@ProviderDescriptorDefinition
-public enum ExampleProviderDescriptor {
-    static func makeDescriptor() -> ProviderDescriptor { ... }
-}
-```
-
-Each provider has:
-- **Descriptor:** Labels, URLs, defaults, fetch pipeline
-- **Fetch Strategy:** Concrete data fetching implementation
-- **Implementation:** Settings/login UI hooks only
-
-Providers support multiple data sources with automatic fallback (e.g., OAuth API → Web API → CLI PTY).
-
-### Data Flow
-
-```
-Background Refresh Timer
-    ↓
-UsageFetcher / Provider Strategies
-    ↓
-UsageStore (MainActor @Observable)
-    ↓
-StatusItemController (Icon Rendering)
-    ↓
-Menu Display + WidgetKit
-```
-
-**Key Stores:**
-- `UsageStore`: Central state for all provider usage data
-- `SettingsStore`: User preferences with UserDefaults persistence
-- `ProviderToggleStore`: Provider enablement state
-
-### Concurrency Model
-
-- Swift 6 Strict Concurrency: `@MainActor` for UI, `Sendable` for state
-- Observation tracking via `withObservationTracking` for reactive updates
-- Background refresh uses `Task.detached` for non-blocking work
-
-## Code Style
-
-- **Indentation:** 4 spaces
-- **Line length:** 120 characters (warning at 120, error at 250)
-- **Explicit `self`:** Required for Swift 6 concurrency - do not remove
-- **MARK comments:** Use for organization
-- **SwiftUI:** Prefer `@Observable` models with `@State` ownership and `@Bindable` in views; avoid `ObservableObject`, `@ObservedObject`, `@StateObject`
-
-## Critical Constraints
-
-### Provider Identity Siloing
-**Never display identity/plan from provider A in provider B's UI.** Each provider's account info must stay isolated.
-
-### Claude CLI Status Line
-Custom and user-configurable - never reliable for usage parsing. Use dedicated probes instead.
-
-### Platform Gating
-Use `#if os(macOS)` for platform-specific code (browser cookies, web dashboard, etc.). Linux CLI builds exclude UI components.
-
-### Keychain Migration
-One-time migration on first launch converts to `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` to prevent prompts on development rebuilds.
-
-## Testing
-
-- Add/extend XCTest cases under `Tests/CodexBarTests/*Tests.swift`
-- Mirror new logic with focused tests (usage parsing, status probes, icon patterns, cost usage)
-- Run `swift test` before handoff
+The build scripts support universal binaries but require host architecture libraries. Build on Apple Silicon for full universal binaries.
 
 ## Documentation
 
-- `docs/architecture.md` - Module breakdown
-- `docs/provider.md` - Provider authoring guide
-- `docs/refresh-loop.md` - Background update behavior
-- `docs/providers.md` - Per-provider data source details
-- `docs/cli.md` - CLI reference
-- `docs/DEVELOPMENT.md` - Development setup + troubleshooting
-
-## Important Files
-
-- `Sources/CodexBar/CodexbarApp.swift` - App initialization
-- `Sources/CodexBar/UsageStore.swift` - Central state management
-- `Sources/CodexBar/StatusItemController.swift` - Menu bar controller
-- `Sources/CodexBar/SettingsStore.swift` - User preferences
-- `Package.swift` - Dependencies and targets
+- `docs/architecture.md`: Module breakdown
+- `docs/providers.md`: Provider overview
+- `docs/refresh-loop.md`: Update cycle
+- `docs/ui.md`: Icon and menu design
+- `docs/cli.md`: CLI reference

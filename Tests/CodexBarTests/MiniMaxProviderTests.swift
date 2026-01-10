@@ -240,3 +240,14 @@ struct MiniMaxUsageParserTests {
         }
     }
 }
+
+@Suite
+struct MiniMaxUsageFetcherTests {
+    // Note: Network mocking tests require serial test execution due to URLProtocol
+    // being a global singleton. Swift Testing runs tests in parallel by default,
+    // causing race conditions with URLProtocol.registerClass.
+    //
+    // To add proper network tests:
+    // 1. Use @Test(.serial) attribute to force serial execution
+    // 2. Or inject URLSession as a dependency for easier mocking
+}
