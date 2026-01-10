@@ -251,16 +251,60 @@ private struct ZaiLimitRaw: Codable {
 public struct ZaiUsageFetcher: Sendable {
     private static let log = CodexBarLog.logger("zai-usage")
 
-    /// Base URL for z.ai quota API
-    private static let quotaAPIURL = "https://api.z.ai/api/monitor/usage/quota/limit"
+    /// Supported domains for z.ai
+    private enum ZaiDomain {
+        case zai        // z.ai (international)
+        case bigmodel   // bigmodel.cn (China)
+
+        var apiDomain: String {
+            switch self {
+            case .zai: return "api.z.ai"
+            case .bigmodel: return "bigmodel.cn"
+            }
+        }
+
+        var quotaAPIURL: URL {
+            URL(string: "https://\(apiDomain)/api/monitor/usage/quota/limit")!
+        }
+
+        var dashboardURL: String {
+            switch self {
+            case .zai: return "https://z.ai/manage-apikey/subscription"
+            case .bigmodel: return "https://bigmodel.cn/usercenter/proj-mgmt/apikeys"
+            }
+        }
+    }
 
     /// Fetches usage stats from z.ai using the provided API key
+    /// Tries z.ai first, then falls back to bigmodel.cn
     public static func fetchUsage(apiKey: String) async throws -> ZaiUsageSnapshot {
         guard !apiKey.isEmpty else {
             throw ZaiUsageError.invalidCredentials
         }
 
-        var request = URLRequest(url: URL(string: quotaAPIURL)!)
+        // Try z.ai first, then fallback to bigmodel.cn
+        let domains: [ZaiDomain] = [.zai, .bigmodel]
+        var lastError: Error?
+
+        for domain in domains {
+            do {
+                return try await fetchUsageFromDomain(apiKey: apiKey, domain: domain)
+            } catch {
+                lastError = error
+                continue
+            }
+        }
+
+        throw lastError ?? ZaiUsageError.networkError("All domains failed")
+    }
+
+    /// Fetches usage stats from a specific domain
+    private static func fetchUsageFromDomain(
+        apiKey: String,
+        domain: ZaiDomain
+    ) async throws -> ZaiUsageSnapshot {
+        let url = domain.quotaAPIURL
+        var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "authorization")
         request.setValue("application/json", forHTTPHeaderField: "accept")
