@@ -91,6 +91,10 @@ Wondering if CodexBar scans your disk? It doesn’t crawl your filesystem; it re
 - Optional: set OpenAI cookies (Automatic or Manual) for Codex dashboard extras.
 
 ## Build from source
+
+**Requires:** Swift 6.2+ and macOS 14+ (Sonoma)
+
+### Quick Start
 ```bash
 swift build -c release          # or debug for development
 ./Scripts/package_app.sh        # builds CodexBar.app in-place
@@ -98,9 +102,26 @@ CODEXBAR_SIGNING=adhoc ./Scripts/package_app.sh  # ad-hoc signing (no Apple Deve
 open CodexBar.app
 ```
 
-Dev loop:
+### Intel (x86_64) Macs
 ```bash
-./Scripts/compile_and_run.sh
+# Build for Intel specifically
+ARCHES="x86_64" ./Scripts/package_app.sh
+
+# Or universal binary (Apple Silicon + Intel)
+./Scripts/package_app.sh  # defaults to universal
+```
+
+### Swift Version Check
+If `swift --version` shows 6.1.x or earlier, install Swift 6.2 via Homebrew:
+```bash
+brew install swift@6.2
+export PATH="/usr/local/opt/swift@6.2/bin:$PATH"
+./Scripts/package_app.sh
+```
+
+### Dev Loop
+```bash
+./Scripts/compile_and_run.sh    # Build, test, package, and launch
 ```
 
 ## Related

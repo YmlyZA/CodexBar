@@ -1,5 +1,23 @@
 # CodexBar Development Guide
 
+## Prerequisites
+
+- **Swift 6.2+** - Check with `swift --version`
+- **macOS 14+** (Sonoma or later)
+- Xcode Command Line Tools: `xcode-select --install`
+
+### Swift Version
+
+CodexBar requires Swift 6.2 or later. If your system has an earlier version:
+
+```bash
+# Install Swift 6.2 via Homebrew
+brew install swift@6.2
+
+# Use Homebrew Swift for building
+export PATH="/usr/local/opt/swift@6.2/bin:$PATH"
+```
+
 ## Quick Start
 
 ### Building and Running
@@ -13,6 +31,19 @@
 
 # Launch existing app (no rebuild)
 ./Scripts/launch.sh
+```
+
+### Intel (x86_64) Macs
+
+```bash
+# Build for Intel specifically
+ARCHES="x86_64" ./Scripts/package_app.sh
+
+# Universal binary (Apple Silicon + Intel)
+./Scripts/package_app.sh
+
+# Ad-hoc signing for local builds
+CODEXBAR_SIGNING=adhoc ./Scripts/package_app.sh
 ```
 
 ### Development Workflow

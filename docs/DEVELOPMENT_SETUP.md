@@ -1,5 +1,43 @@
 # Development Setup Guide
 
+## Prerequisites
+
+### Swift Version Requirement
+
+CodexBar requires **Swift 6.2 or later**.
+
+Check your Swift version:
+```bash
+swift --version
+```
+
+If you have Swift 6.1.x or earlier, install Swift 6.2 via Homebrew:
+
+```bash
+# Install Swift 6.2
+brew install swift@6.2
+
+# Add to your PATH (add to ~/.zshrc for persistence)
+export PATH="/usr/local/opt/swift@6.2/bin:$PATH"
+
+# Verify installation
+swift --version
+```
+
+### Architecture Support
+
+CodexBar supports both Apple Silicon (arm64) and Intel (x86_64) Macs.
+
+For **Intel Macs**, build with:
+```bash
+ARCHES="x86_64" ./Scripts/package_app.sh
+```
+
+For **universal binaries** (arm64 + x86_64):
+```bash
+./Scripts/package_app.sh  # defaults to universal
+```
+
 ## Reducing Keychain Permission Prompts
 
 When developing CodexBar, you may see frequent keychain permission prompts like:
