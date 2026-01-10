@@ -5,12 +5,53 @@ import FoundationNetworking
 
 public struct MiniMaxUsageFetcher: Sendable {
     private static let log = CodexBarLog.logger("minimax-usage")
-    private static let codingPlanURL = URL(
-        string: "https://platform.minimax.io/user-center/payment/coding-plan?cycle_type=3")!
-    private static let codingPlanRefererURL =
-        URL(string: "https://platform.minimax.io/user-center/payment/coding-plan")!
-    private static let codingPlanRemainsURL =
-        URL(string: "https://platform.minimax.io/v1/api/openplatform/coding_plan/remains")!
+
+    private enum MiniMaxDomain {
+        case io
+        case minimaxi
+
+        // Base domain for HTML pages (platform.*)
+        var baseDomain: String {
+            switch self {
+            case .io: return "minimax.io"
+            case .minimaxi: return "minimaxi.com"
+            }
+        }
+
+        // API domain (differs for minimaxi)
+        var apiDomain: String {
+            switch self {
+            case .io: return "minimax.io"
+            case .minimaxi: return "www.minimaxi.com"
+            }
+        }
+
+        var codingPlanURL: URL {
+            URL(string: "https://platform.\(baseDomain)/user-center/payment/coding-plan?cycle_type=3")!
+        }
+
+        var codingPlanRefererURL: URL {
+            URL(string: "https://platform.\(baseDomain)/user-center/payment/coding-plan")!
+        }
+
+        var codingPlanRemainsURL: URL {
+            URL(string: "https://\(apiDomain)/v1/api/openplatform/coding_plan/remains")!
+        }
+
+        var origin: String {
+            switch self {
+            case .io: return "https://platform.minimax.io"
+            case .minimaxi: return "https://www.minimaxi.com"
+            }
+        }
+    }
+
+    private static let codingPlanURL = MiniMaxDomain.io.codingPlanURL
+    private static let codingPlanRefererURL = MiniMaxDomain.io.codingPlanRefererURL
+    private static let codingPlanRemainsURL = MiniMaxDomain.io.codingPlanRemainsURL
+    private static let codingPlanURLMinimaxi = MiniMaxDomain.minimaxi.codingPlanURL
+    private static let codingPlanRefererURLMinimaxi = MiniMaxDomain.minimaxi.codingPlanRefererURL
+    private static let codingPlanRemainsURLMinimaxi = MiniMaxDomain.minimaxi.codingPlanRemainsURL
 
     public static func fetchUsage(
         cookieHeader: String,
@@ -22,30 +63,53 @@ public struct MiniMaxUsageFetcher: Sendable {
             throw MiniMaxUsageError.invalidCredentials
         }
 
-        do {
-            return try await self.fetchCodingPlanHTML(
-                cookie: cookie,
-                authorizationToken: authorizationToken,
-                now: now)
-        } catch let error as MiniMaxUsageError {
-            if case .parseFailed = error {
-                Self.log.debug("MiniMax coding plan HTML parse failed, trying remains API")
-                return try await self.fetchCodingPlanRemains(
+        // Try minimax.io first, then fallback to minimaxi.com
+        let domains: [MiniMaxDomain] = [.io, .minimaxi]
+        var lastError: Error?
+
+        for domain in domains {
+            do {
+                return try await self.fetchCodingPlanHTML(
                     cookie: cookie,
                     authorizationToken: authorizationToken,
-                    groupID: groupID,
-                    now: now)
+                    now: now,
+                    domain: domain)
+            } catch let error as MiniMaxUsageError {
+                if case .parseFailed = error {
+                    Self.log.debug("MiniMax coding plan HTML parse failed for \(domain.baseDomain), trying remains API")
+                    do {
+                        return try await self.fetchCodingPlanRemains(
+                            cookie: cookie,
+                            authorizationToken: authorizationToken,
+                            groupID: groupID,
+                            now: now,
+                            domain: domain)
+                    } catch {
+                        lastError = error
+                        continue
+                    }
+                }
+                lastError = error
+            } catch {
+                lastError = error
             }
-            throw error
         }
+
+        if let minimaxError = lastError as? MiniMaxUsageError {
+            throw minimaxError
+        }
+        throw MiniMaxUsageError.networkError("All domains failed")
     }
 
     private static func fetchCodingPlanHTML(
         cookie: String,
         authorizationToken: String?,
-        now: Date) async throws -> MiniMaxUsageSnapshot
+        now: Date,
+        domain: MiniMaxDomain) async throws -> MiniMaxUsageSnapshot
     {
-        var request = URLRequest(url: self.codingPlanURL)
+        let url = domain.codingPlanURL
+        let refererURL = domain.codingPlanRefererURL
+        var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.setValue(cookie, forHTTPHeaderField: "Cookie")
         if let authorizationToken {
@@ -58,8 +122,8 @@ public struct MiniMaxUsageFetcher: Sendable {
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
         request.setValue(userAgent, forHTTPHeaderField: "user-agent")
         request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "accept-language")
-        request.setValue("https://platform.minimax.io", forHTTPHeaderField: "origin")
-        request.setValue(self.codingPlanRefererURL.absoluteString, forHTTPHeaderField: "referer")
+        request.setValue(domain.origin, forHTTPHeaderField: "origin")
+        request.setValue(refererURL.absoluteString, forHTTPHeaderField: "referer")
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -95,9 +159,12 @@ public struct MiniMaxUsageFetcher: Sendable {
         cookie: String,
         authorizationToken: String?,
         groupID: String?,
-        now: Date) async throws -> MiniMaxUsageSnapshot
+        now: Date,
+        domain: MiniMaxDomain) async throws -> MiniMaxUsageSnapshot
     {
-        let remainsURL = self.appendGroupID(groupID, to: self.codingPlanRemainsURL)
+        let baseURL = domain.codingPlanRemainsURL
+        let remainsURL = self.appendGroupID(groupID, to: baseURL)
+        let refererURL = domain.codingPlanRefererURL
         var request = URLRequest(url: remainsURL)
         request.httpMethod = "GET"
         request.setValue(cookie, forHTTPHeaderField: "Cookie")
@@ -112,8 +179,8 @@ public struct MiniMaxUsageFetcher: Sendable {
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
         request.setValue(userAgent, forHTTPHeaderField: "user-agent")
         request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "accept-language")
-        request.setValue("https://platform.minimax.io", forHTTPHeaderField: "origin")
-        request.setValue(self.codingPlanRefererURL.absoluteString, forHTTPHeaderField: "referer")
+        request.setValue(domain.origin, forHTTPHeaderField: "origin")
+        request.setValue(refererURL.absoluteString, forHTTPHeaderField: "referer")
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
