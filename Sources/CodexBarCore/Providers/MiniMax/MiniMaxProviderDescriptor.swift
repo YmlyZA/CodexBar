@@ -116,7 +116,7 @@ struct MiniMaxCodingPlanFetchStrategy: ProviderFetchStrategy {
                 Self.log.debug("Trying MiniMax cookies from \(session.sourceLabel)\(tokenLabel)")
                 do {
                     let snapshot = try await MiniMaxUsageFetcher.fetchUsage(
-                        cookieHeader: session.cookieHeader,
+                        session: session,
                         authorizationToken: token,
                         groupID: groupID)
                     Self.log.debug("MiniMax cookies valid from \(session.sourceLabel)")

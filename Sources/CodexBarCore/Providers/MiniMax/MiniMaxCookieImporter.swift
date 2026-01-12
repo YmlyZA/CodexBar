@@ -26,6 +26,38 @@ public enum MiniMaxCookieImporter {
         public var cookieHeader: String {
             self.cookies.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
         }
+
+        /// Returns a Cookie header with only cookies matching the specified domain
+        public func cookieHeader(forDomain domain: String) -> String {
+            let normalizedTarget = domain.hasPrefix(".") ? String(domain.dropFirst()) : domain
+            let filtered = self.cookies.filter { cookie in
+                guard !cookie.domain.isEmpty else {
+                    // Cookie without domain defaults to current domain
+                    return true
+                }
+
+                let cookieDomain = cookie.domain
+                let normalizedCookieDomain = cookieDomain.hasPrefix(".")
+                    ? String(cookieDomain.dropFirst())
+                    : cookieDomain
+
+                // Exact match
+                if normalizedCookieDomain == normalizedTarget { return true }
+
+                // Cookie domain starts with "." (domain-scoped cookie)
+                // Check if target domain matches or is a subdomain of the cookie domain
+                if cookieDomain.hasPrefix(".") {
+                    // ".minimaxi.com" matches "minimaxi.com" and "www.minimaxi.com"
+                    // ".www.minimaxi.com" matches "www.minimaxi.com" and "api.www.minimaxi.com"
+                    return normalizedTarget == normalizedCookieDomain ||
+                           normalizedTarget.hasSuffix(".\(normalizedCookieDomain)")
+                }
+
+                // Host-specific cookie (no leading dot) - exact match only
+                return normalizedCookieDomain == normalizedTarget
+            }
+            return filtered.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
+        }
     }
 
     public static func importSessions(

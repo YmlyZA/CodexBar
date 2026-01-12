@@ -101,6 +101,62 @@ public struct MiniMaxUsageFetcher: Sendable {
         throw MiniMaxUsageError.networkError("All domains failed")
     }
 
+    /// Fetch usage with domain-filtered cookies from SessionInfo
+    /// This prevents sending cookies from unrelated domains which may cause API rejection
+    public static func fetchUsage(
+        session: MiniMaxCookieImporter.SessionInfo,
+        authorizationToken: String? = nil,
+        groupID: String? = nil,
+        now: Date = Date()) async throws -> MiniMaxUsageSnapshot
+    {
+        // Try minimax.io first, then fallback to minimaxi.com
+        let domains: [(domain: MiniMaxDomain, cookieDomain: String)] = [
+            (.io, "minimax.io"),
+            (.minimaxi, "www.minimaxi.com")
+        ]
+        var lastError: Error?
+
+        for (domain, cookieDomain) in domains {
+            // Get only cookies matching this domain
+            let domainCookieHeader = session.cookieHeader(forDomain: cookieDomain)
+            guard let cookie = MiniMaxCookieHeader.normalized(from: domainCookieHeader) else {
+                continue
+            }
+
+            Self.log.debug("Trying MiniMax domain \(cookieDomain) with filtered cookies")
+            do {
+                return try await self.fetchCodingPlanHTML(
+                    cookie: cookie,
+                    authorizationToken: authorizationToken,
+                    now: now,
+                    domain: domain)
+            } catch let error as MiniMaxUsageError {
+                if case .parseFailed = error {
+                    Self.log.debug("MiniMax coding plan HTML parse failed for \(domain.baseDomain), trying remains API")
+                    do {
+                        return try await self.fetchCodingPlanRemains(
+                            cookie: cookie,
+                            authorizationToken: authorizationToken,
+                            groupID: groupID,
+                            now: now,
+                            domain: domain)
+                    } catch {
+                        lastError = error
+                        continue
+                    }
+                }
+                lastError = error
+            } catch {
+                lastError = error
+            }
+        }
+
+        if let minimaxError = lastError as? MiniMaxUsageError {
+            throw minimaxError
+        }
+        throw MiniMaxUsageError.networkError("All domains failed")
+    }
+
     private static func fetchCodingPlanHTML(
         cookie: String,
         authorizationToken: String?,
